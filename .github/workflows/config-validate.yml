@@ -14,37 +14,33 @@ jobs:
   promtool:
     name: promtool check
     runs-on: ubuntu-latest
-    container:
-      image: prom/prometheus:v2.53.0
-      options: --entrypoint ""
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check alerting rules
+      # prom images are busybox-based (no node), so actions can't run inside
+      # them as job containers — run promtool via docker instead.
+      - name: Check alerting rules and Prometheus config
         run: |
-          for f in prometheus/alerts/*.yml; do
-            promtool check rules "$f"
-          done
-
-      - name: Check Prometheus config
-        run: promtool check config prometheus/prometheus.yml
+          docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" \
+            --entrypoint /bin/sh prom/prometheus:v2.53.0 -c '
+              promtool check rules /etc/prometheus/alerts/*.yml &&
+              promtool check config /etc/prometheus/prometheus.yml'
 
   amtool:
     name: amtool check-config
     runs-on: ubuntu-latest
-    container:
-      image: prom/alertmanager:v0.27.0
-      options: --entrypoint ""
     steps:
       - uses: actions/checkout@v4
 
       - name: Check Alertmanager config
         run: |
           # Placeholders are substituted at container start; fill dummies for validation.
-          sed -e 's|${PAGERDUTY_ROUTING_KEY}|dummy|g' \
-              -e 's|${SLACK_WEBHOOK_URL}|https://hooks.slack.com/services/dummy|g' \
-              alertmanager/alertmanager.yml > /tmp/alertmanager.yml
-          amtool check-config /tmp/alertmanager.yml
+          docker run --rm -v "$PWD/alertmanager:/cfg:ro" \
+            --entrypoint /bin/sh prom/alertmanager:v0.27.0 -c '
+              sed -e "s|\${PAGERDUTY_ROUTING_KEY}|dummy|g" \
+                  -e "s|\${SLACK_WEBHOOK_URL}|https://hooks.slack.com/services/dummy|g" \
+                  /cfg/alertmanager.yml > /tmp/alertmanager.yml &&
+              amtool check-config /tmp/alertmanager.yml'
 
   loki:
     name: loki / promtail config verify
