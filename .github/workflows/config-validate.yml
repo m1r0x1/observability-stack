@@ -21,10 +21,12 @@ jobs:
       # them as job containers — run promtool via docker instead.
       - name: Check alerting rules and Prometheus config
         run: |
+          # --syntax-only for the config: it references in-cluster credential
+          # files (kubernetes_sd) that don't exist in CI. Rules are checked fully.
           docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" \
             --entrypoint /bin/sh prom/prometheus:v2.53.0 -c '
               promtool check rules /etc/prometheus/alerts/*.yml &&
-              promtool check config /etc/prometheus/prometheus.yml'
+              promtool check config --syntax-only /etc/prometheus/prometheus.yml'
 
   amtool:
     name: amtool check-config
