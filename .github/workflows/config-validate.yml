@@ -1,0 +1,84 @@
+---
+name: Validate configs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  promtool:
+    name: promtool check
+    runs-on: ubuntu-latest
+    container:
+      image: prom/prometheus:v2.53.0
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check alerting rules
+        run: |
+          for f in prometheus/alerts/*.yml; do
+            promtool check rules "$f"
+          done
+
+      - name: Check Prometheus config
+        run: promtool check config prometheus/prometheus.yml
+
+  amtool:
+    name: amtool check-config
+    runs-on: ubuntu-latest
+    container:
+      image: prom/alertmanager:v0.27.0
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Alertmanager config
+        run: |
+          # Placeholders are substituted at container start; fill dummies for validation.
+          sed -e 's|${PAGERDUTY_ROUTING_KEY}|dummy|g' \
+              -e 's|${SLACK_WEBHOOK_URL}|https://hooks.slack.com/services/dummy|g' \
+              alertmanager/alertmanager.yml > /tmp/alertmanager.yml
+          amtool check-config /tmp/alertmanager.yml
+
+  loki:
+    name: loki / promtail config verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Loki config
+        run: |
+          docker run --rm -v "$PWD/loki:/cfg:ro" --entrypoint /usr/bin/loki \
+            grafana/loki:3.1.0 -config.file=/cfg/loki-config.yml -verify-config
+
+      - name: Verify Promtail config
+        run: |
+          docker run --rm -v "$PWD/loki:/cfg:ro" --entrypoint /usr/bin/promtail \
+            grafana/promtail:3.1.0 -config.file=/cfg/promtail-config.yml -check-syntax
+
+  compose:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file
+        run: docker compose -f docker-compose.yml config -q
+
+  dashboards:
+    name: dashboards are valid JSON
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: jq parse
+        run: |
+          for f in grafana/dashboards/*.json; do
+            jq empty "$f" && echo "OK: $f"
+          done
